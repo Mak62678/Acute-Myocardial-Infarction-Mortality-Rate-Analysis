@@ -1,0 +1,146 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+data <- read_csv("NHANES_Cardio.csv")
+```
+```{r}
+clean_data_standarized <- data %>% 
+  filter(Data_Value_Type == "Age-Standardized") %>% 
+  select(-starts_with("PriorityArea"), -ends_with("Id"), -Geolocation) %>% filter(is.na(Data_Value_Footnote)) %>% filter(Topic =="Acute Myocardial Infarction (Heart Attack)")
+
+clean_data_standarized <- clean_data_standarized %>% select(-Data_Value_Footnote, -DataSource, -Data_Value_Footnote_Symbol)
+```
+
+
+```{r}
+data_regions <- clean_data_standarized %>%
+  mutate(US_Region = case_when(
+    LocationDesc %in% c("Maine", "New Hampshire", "Vermont", "Massachusetts", "Rhode Island", "Connecticut", "New York", "New Jersey", "Pennsylvania") ~ "Northeast",
+    LocationDesc %in% c("Delaware", "Maryland", "District of Columbia", "Virginia", "West Virginia", "North Carolina", "South Carolina", "Georgia", "Florida", "Kentucky", "Tennessee", "Alabama", "Mississippi", "Arkansas", "Louisiana", "Washington, DC") ~ "South",
+    LocationDesc %in% c("Texas", "Oklahoma", "New Mexico", "Arizona", "California", "Nevada", "Utah", "Colorado", "Wyoming", "Montana", "Idaho", "Washington", "Oregon", "Alaska", "Hawaii") ~ "West",
+    LocationDesc %in% c("North Dakota", "South Dakota", "Nebraska", "Kansas", "Minnesota", "Iowa", "Missouri", "Wisconsin", "Illinois", "Michigan", "Indiana", "Ohio") ~ "Midwest",
+    TRUE ~ "Other")) %>% 
+  select(YearStart, US_Region, everything())  # Move US_Region to the second position
+
+data_regions_2020 <- data_regions %>% filter(US_Region != "Other") %>% mutate(US_Region = factor(trimws(US_Region))) %>% dplyr::filter(YearStart == "2020")
+
+data_region_overall_2020 <- data_regions_2020 %>% dplyr::filter(Break_Out_Category == "Overall") %>% dplyr::select(-YearStart)
+
+data_region_overall_avg_2020 <- data_region_overall_2020 %>% dplyr::group_by(US_Region) %>% dplyr::summarise(avg_value = mean(Data_Value)) 
+overall_avg_2020 <- data_region_overall_avg_2020 %>% summarise(US_Region = "Overall", avg_value = mean(avg_value))
+data_region_overall_avg_2020 <- bind_rows(data_region_overall_avg_2020, overall_avg_2020)
+data_region_overall_avg_2020$avg_value <- as.numeric(data_region_overall_avg_2020$avg_value)
+```
+
+```{r}
+data_regions <- data_regions %>% 
+  filter(US_Region != "Other") %>%
+  mutate(US_Region = factor(trimws(US_Region)))
+data_region_overall <- data_regions %>% filter(Break_Out_Category == "Overall")
+data_region_avg <- data_region_overall %>% dplyr::group_by(US_Region,YearStart) %>%  dplyr::summarise(avg_value = mean(Data_Value))
+
+ggplot(data_region_avg, aes(x = YearStart, y = avg_value, fill = US_Region)) +
+  geom_point(stat = "identity", shape = 21, alpha=0.5, size = 2) +  # Use stat = "identity" for scatter plot with filled circles
+  labs(x = "Year", y = "Mortality rate per 10,000", title = "Acute Myocardial Infarction Mortality Rate in US per region from 2000 to 2020") +
+  scale_fill_manual(values = c("Northeast" = "#02000d", "South" = "#eddbcd", "West" = "#a71f13", "Midwest" = "#c09bac", "Overall" = "#0f1b27")) +theme_minimal()
+```
+
+
+```{r}
+ggplot(data_region_overall_avg_2020, aes(x = US_Region, y = avg_value)) +
+  geom_col(stats = "identity")  +
+  labs(x = "Region", y = "Mortality rate per 10,000", title = "Acute Myocardial Infarction Mortality Rate in America by Region in 2020")
+
+table_data <- data_region_overall_avg_2020 %>%
+  select(US_Region, avg_value) %>%
+  arrange(desc(avg_value))  # Arrange rows by descending average value if needed
+kable(table_data, col.names = c("Regions", "Average AMI Mortality Rate"), caption = "Acute Myocardial Infarction Mortality Rate in America by Region in 2020", format = "html")
+
+
+
+```
+
+```{r}
+region_anova_result <- aov(Data_Value ~ US_Region, data = data_region_overall_2020)
+summary(region_anova_result)
+anova_table <- anova(region_anova_result)
+
+anova_table_df <- data.frame(
+  Source = rownames(anova_table),
+  `Degrees of Freedom` = anova_table$Df,
+  `F-statistic` = anova_table$`F value`,
+  `P-value` = anova_table$`Pr(>F)`
+)
+
+print(anova_table_df)
+
+```
+
+
+```{r}
+Race_Data_Year_avg <- data_regions_2020 %>% filter(Break_Out_Category == "Race") %>% group_by(US_Region,Break_Out)%>%
+   dplyr::summarise(avg_value = mean(Data_Value, na.rm = TRUE))
+Gender_Data_Year_avg <- data_regions_2020 %>% filter(Break_Out_Category == "Gender")%>% group_by(US_Region,Break_Out )%>%
+   dplyr::summarise(avg_value = mean(Data_Value, na.rm = TRUE))
+```
+
+```{r}
+ggplot(Race_Data_Year_avg, aes(x = US_Region, y = avg_value, fill=Break_Out)) +
+  geom_bar(stat = "identity", position = "dodge") +  # Use stat = "identity" for bar heights to represent the calculated average
+  labs(x = "Region", y = "Mortality rate per 10,000", title = "Average AMI Mortality Rate by Race and US Region in 2020", fill = "Race") +
+  scale_fill_manual(values = c("Hispanic" = "#d3d4f9", "Non-Hispanic Black" = "#d9d9d9", "Non-Hispanic White" = "#0f1b27", "Other" = "#bfafaf")) +theme_minimal()
+
+ggplot(Gender_Data_Year_avg, aes(x = US_Region, y = avg_value, fill = Break_Out)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Region", y = "Mortality rate per 10,000", title = "Average AMI Mortality Rate by Gender and US Region in 2020", fill = "Gender") +
+  scale_fill_manual(values = c("Male" = "#d3d4f9", "Female" = "#eddbcd")) +
+  theme_minimal()
+```
+```{r}
+
+Hispanic_Data_Year_avg <-data_regions_2020 %>% filter(Break_Out == "Hispanic")
+Black_Data_Year_avg <-data_regions_2020 %>% filter(Break_Out == "Non-Hispanic Black")
+White_Data_Year_avg <-data_regions_2020 %>% filter(Break_Out == "Non-Hispanic White")
+Other_Data_Year_avg <-data_regions_2020 %>% filter(Break_Out == "Other")
+
+Hispanic_race_anova_result <- aov(Data_Value ~ US_Region, data = Hispanic_Data_Year_avg)
+Black_race_anova_result <- aov(Data_Value ~ US_Region, data = Black_Data_Year_avg)
+White_race_anova_result <- aov(Data_Value ~ US_Region, data = White_Data_Year_avg)
+Other_race_anova_result <- aov(Data_Value ~ US_Region, data = Other_Data_Year_avg)
+
+summary(Hispanic_race_anova_result)
+summary(Black_race_anova_result)
+summary(White_race_anova_result)
+summary(Other_race_anova_result)
+```
+
+```{r}
+Male_Data_Year_avg <-data_regions_2020 %>% filter(Break_Out == "Male")
+Female_Data_Year_avg <-data_regions_2020 %>% filter(Break_Out == "Female")
+Male_race_anova_result <- aov(Data_Value ~ US_Region, data = Male_Data_Year_avg)
+Female_race_anova_result <- aov(Data_Value ~ US_Region, data = Female_Data_Year_avg)
+
+summary(Male_race_anova_result)
+summary(Female_race_anova_result)
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
